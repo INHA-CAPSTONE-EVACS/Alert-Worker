@@ -163,3 +163,11 @@ describe('RedisRouteVersionStore', () => {
     expect(await routes.isLatest(dispatchId, 3)).toBe(false);
   });
 });
+
+test('unschedule removes an alert from the expiry index', async () => {
+  const repo = new AlertStateRepository(redis);
+  const alertId = uniqueId('ALT');
+  await repo.save(state({alertId, expiresAt: new Date(Date.now() - 1).toISOString()}));
+  await repo.unschedule(alertId);
+  expect(await repo.dueForExpiry(Date.now(), 100)).not.toContain(alertId);
+});

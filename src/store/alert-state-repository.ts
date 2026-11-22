@@ -88,4 +88,8 @@ export class AlertStateRepository implements AlertStateStore {
   async dueForExpiry(nowMs: number, limit: number): Promise<string[]> {
     return this.redis.zrangebyscore(ALERT_EXPIRY_KEY, '-inf', nowMs, 'LIMIT', 0, limit);
   }
+
+  async unschedule(alertId: string): Promise<void> {
+    await this.redis.zrem(ALERT_EXPIRY_KEY, alertId);
+  }
 }

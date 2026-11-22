@@ -118,6 +118,8 @@ export interface AlertStateStore {
   transition(alertId: string, from: readonly AlertStatus[], to: AlertStatus, patch: Partial<AlertState>,
     expectedVersion?: number): Promise<AlertState | null>;
   dueForExpiry(nowMs: number, limit: number): Promise<string[]>;
+  /** Drops an alert from the expiry index (used for entries that can no longer expire). */
+  unschedule(alertId: string): Promise<void>;
 }
 
 export interface Deduplicator {

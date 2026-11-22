@@ -8,6 +8,7 @@ import {isTerminal} from '../../src/domain/types';
 export class FakeStates implements AlertStateStore {
   readonly states = new Map<string, AlertState>();
   readonly active = new Map<string, string>();
+  readonly unscheduled: string[] = [];
 
   get(alertId: string): AlertState | undefined { return this.states.get(alertId); }
 
@@ -50,6 +51,8 @@ export class FakeStates implements AlertStateStore {
         && Date.parse(state.expiresAt) <= nowMs)
       .map(state => state.alertId);
   }
+
+  async unschedule(alertId: string) { this.unscheduled.push(alertId); }
 }
 
 export class FakeDedup implements Deduplicator {
