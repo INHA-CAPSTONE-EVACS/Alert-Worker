@@ -1,6 +1,12 @@
 import type {
-  ApproachDirection, ClearReason, Coordinates, RecommendedAction,
+  ApproachDirection, ClearReason, Coordinates, RecommendedAction, YieldAlertRequestedPayload,
 } from './contracts';
+
+/** Envelope facts the services need for ordering decisions. */
+export interface EventMeta {
+  eventId: string;
+  occurredAt: string;
+}
 
 export const ALERT_STATUSES = ['PENDING', 'SENT', 'ACKNOWLEDGED', 'CLEARED', 'EXPIRED', 'FAILED'] as const;
 export type AlertStatus = typeof ALERT_STATUSES[number];
@@ -23,6 +29,10 @@ export interface AlertState {
   acknowledgedAt: string | null;
   clearedAt: string | null;
   expiresAt: string;
+  /** occurredAt of the request that set the current version; older clear requests are stale. */
+  decidedAt: string;
+  /** Latest request suppressed by dedup; the sweep re-issues it before the current version lapses. */
+  refresh: YieldAlertRequestedPayload | null;
 }
 
 export interface YieldAlertIssuedMessage {
@@ -112,13 +122,16 @@ export interface LogStatusExtra {
 export interface AlertStateStore {
   findById(alertId: string): Promise<AlertState | null>;
   findActive(dispatchId: string, vehicleId: string): Promise<AlertState | null>;
-  /** Writes unless a higher alertVersion is stored; false means a newer state already exists. */
-  save(state: AlertState): Promise<boolean>;
+  /**
+   * Writes unless a higher alertVersion is stored or the episode fence fails. `expectedEpisode` is the alertLogId
+   * that must currently be live (non-terminal), or null when no other live episode may exist.
+   */
+  save(state: AlertState, expectedEpisode: string | null): Promise<boolean>;
   /** Applies patch only if the status is in `from` (and the version matches); null otherwise. */
   transition(alertId: string, from: readonly AlertStatus[], to: AlertStatus, patch: Partial<AlertState>,
     expectedVersion?: number): Promise<AlertState | null>;
   dueForExpiry(nowMs: number, limit: number): Promise<string[]>;
-  /** Drops an alert from the expiry index (used for entries that can no longer expire). */
+  /** Drops an alert from the expiry index unless it is still live (SENT/ACKNOWLEDGED). */
   unschedule(alertId: string): Promise<void>;
 }
 

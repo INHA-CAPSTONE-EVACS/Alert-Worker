@@ -16,6 +16,11 @@ export class AcknowledgementService {
     if (!current || current.targetVehicleId !== p.vehicleId || !this.isCurrentVersion(current, p.alertVersion)) {
       return;
     }
+    if (current.status === 'ACKNOWLEDGED') {
+      // Redelivered ACK: the state already reflects it, so only re-apply the idempotent history write.
+      await logs.updateStatus(current.alertLogId, 'ACKNOWLEDGED', current.acknowledgedAt ?? p.receivedAt);
+      return;
+    }
     // The version fence protects against an update re-sent between the read and this write.
     const acknowledged = await states.transition(p.alertId, ['SENT'], 'ACKNOWLEDGED',
       {acknowledgedAt: p.receivedAt}, p.alertVersion);

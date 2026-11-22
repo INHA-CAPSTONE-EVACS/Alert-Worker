@@ -1,7 +1,7 @@
 import {AlertMessageFactory} from '../../../src/alert/alert-message-factory';
 import {YieldAlertService} from '../../../src/alert/yield-alert-service';
 import {AlertDeliverer} from '../../../src/delivery/alert-deliverer';
-import {NOW, requested} from '../../support/fixtures';
+import {NOW, meta, requested} from '../../support/fixtures';
 import {FakeDedup, FakeLogs, FakePublisher, FakeSessions, FakeStates} from '../../support/fakes';
 
 let states: FakeStates;
@@ -10,15 +10,17 @@ let sessions: FakeSessions;
 let publisher: FakePublisher;
 let logs: FakeLogs;
 let svc: YieldAlertService;
+let now: string;
 
 beforeEach(() => {
+  now = NOW;
   states = new FakeStates();
   dedup = new FakeDedup();
   sessions = new FakeSessions();
   publisher = new FakePublisher();
   logs = new FakeLogs();
   svc = new YieldAlertService({states, dedup, logs, factory: new AlertMessageFactory(),
-    deliverer: new AlertDeliverer(sessions, publisher), clock: () => new Date(NOW)});
+    deliverer: new AlertDeliverer(sessions, publisher), clock: () => new Date(now)});
   sessions.connect('VEH-001');
 });
 
@@ -148,4 +150,81 @@ test('re-request after FAILED delivery retries as new episode', async () => {
   sessions.connect('VEH-001');
   expect((await svc.handleRequested(requested({decisionVersion: 4}))).outcome).toBe('SENT');
   expect(logs.rows.size).toBe(2);
+});
+
+const later = (ms: number) => new Date(Date.parse(NOW) + ms).toISOString();
+
+test('redelivery after expiresAt still repairs missing history', async () => {
+  logs.failNext = 1;
+  await expect(svc.handleRequested(requested())).rejects.toThrow('postgres');
+  expect(publisher.frames).toHaveLength(1);
+  now = later(30_000);
+  expect((await svc.handleRequested(requested())).outcome).toBe('DUPLICATE');
+  expect(publisher.frames).toHaveLength(1);
+  expect([...logs.rows.values()]).toEqual([expect.objectContaining({alertStatus: 'SENT', alertVersion: 3})]);
+});
+
+test('redelivered update repairs the log version', async () => {
+  await svc.handleRequested(requested());
+  logs.failNext = 1;
+  const update = requested({decisionVersion: 4, approachDirection: 'LEFT'});
+  await expect(svc.handleRequested(update)).rejects.toThrow('postgres');
+  expect((await svc.handleRequested(update)).outcome).toBe('DUPLICATE');
+  expect(publisher.frames).toHaveLength(2);
+  expect([...logs.rows.values()][0]!.alertVersion).toBe(4);
+});
+
+test('redelivered clear repairs the cleared log', async () => {
+  await svc.handleRequested(requested(), meta(NOW));
+  logs.failNext = 1;
+  await expect(svc.handleClearRequested(clear, meta(later(1000)))).rejects.toThrow('postgres');
+  expect((await svc.handleClearRequested(clear, meta(later(1000)))).outcome).toBe('NO_ACTIVE_ALERT');
+  expect([...logs.rows.values()][0]).toMatchObject({alertStatus: 'CLEARED', clearReason: 'EMERGENCY_PASSED'});
+  expect(publisher.frames).toHaveLength(2);
+});
+
+test('redelivered old clear does not end a newer episode', async () => {
+  await svc.handleRequested(requested(), meta(NOW));
+  await svc.handleClearRequested(clear, meta(later(1000)));
+  await svc.handleRequested(requested({decisionVersion: 5}), meta(later(2000)));
+  expect((await svc.handleClearRequested(clear, meta(later(1000)))).outcome).toBe('STALE');
+  expect(states.get('ALT-001')).toMatchObject({status: 'SENT', alertVersion: 5});
+  expect(publisher.frames).toHaveLength(3);
+});
+
+test('an expiry sweep cannot end an update that is being sent', async () => {
+  await svc.handleRequested(requested());
+  const publish = publisher.publish.bind(publisher);
+  let sweepResult: unknown = 'not run';
+  publisher.publish = async (gatewayId, frame) => {
+    sweepResult = await states.transition('ALT-001', ['SENT', 'ACKNOWLEDGED'], 'EXPIRED', {});
+    return publish(gatewayId, frame);
+  };
+  expect((await svc.handleRequested(requested({decisionVersion: 4, approachDirection: 'LEFT'}))).outcome)
+    .toBe('SENT');
+  expect(sweepResult).toBeNull();
+  expect(states.get('ALT-001')).toMatchObject({status: 'SENT', alertVersion: 4});
+});
+
+test('publish failure leaves the alert PENDING and redelivery sends it', async () => {
+  const publish = publisher.publish.bind(publisher);
+  publisher.publish = async () => { throw new Error('redis down'); };
+  await expect(svc.handleRequested(requested())).rejects.toThrow('redis down');
+  expect(states.get('ALT-001')!.status).toBe('PENDING');
+  publisher.publish = publish;
+  expect((await svc.handleRequested(requested())).outcome).toBe('SENT');
+  expect(states.get('ALT-001')!.status).toBe('SENT');
+  expect(publisher.frames).toHaveLength(1);
+});
+
+test('a suppressed request is kept as a refresh with its later expiry', async () => {
+  await svc.handleRequested(requested());
+  const refresh = requested({decisionVersion: 4, estimatedArrivalSeconds: 12, expiresAt: later(25_000)});
+  expect((await svc.handleRequested(refresh)).outcome).toBe('SUPPRESSED');
+  expect(states.get('ALT-001')).toMatchObject({alertVersion: 3, refresh});
+});
+
+test('state records the deciding event time', async () => {
+  await svc.handleRequested(requested(), meta(later(500)));
+  expect(states.get('ALT-001')!.decidedAt).toBe(later(500));
 });

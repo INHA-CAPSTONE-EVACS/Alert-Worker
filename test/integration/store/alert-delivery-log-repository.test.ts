@@ -56,3 +56,12 @@ test('findByDispatchId orders by first_sent_at', async () => {
   expect((await repo.findByDispatchId(dispatchId)).map(row => row.alertLogId))
     .toEqual([earlier.alertLogId, later.alertLogId]);
 });
+
+test.each(['SENT', 'ACKNOWLEDGED'] as const)('an ended row is never moved back to %s', async status => {
+  const row = log();
+  await repo.insert(row);
+  await repo.updateStatus(row.alertLogId, 'EXPIRED', '2026-10-12T08:00:20.000Z', {clearReason: 'EXPIRED'});
+  await repo.updateStatus(row.alertLogId, status, '2026-10-12T08:00:21.000Z', {alertVersion: 9});
+  expect((await repo.findByDispatchId(row.dispatchId))[0]).toMatchObject({alertStatus: 'EXPIRED', alertVersion: 3,
+    acknowledgedAt: null});
+});

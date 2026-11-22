@@ -15,13 +15,18 @@ Gateway(차량 ACK) ─XADD─▶ stream:alert:event ─┘        │
 
 | 이벤트 | 처리 |
 |---|---|
-| `YIELD_ALERT_REQUESTED` | 만료된 요청, 낮은 `decisionVersion`, 같은 버전 재전달, 10초 안에 같은 안내(권장 행동 + 접근 방향)가 반복되면 보내지 않는다. 나머지는 `YIELD_ALERT_ISSUED`로 보낸다. `alertVersion`은 `decisionVersion`과 같다. |
-| `YIELD_ALERT_CLEAR_REQUESTED` | 활성 알림이 있으면 `YIELD_ALERT_CLEARED`를 보내고 CLEARED로 바꾼다. 차량이 오프라인이어도 알림은 종료한다. |
+| `YIELD_ALERT_REQUESTED` | 낮은 `decisionVersion`, 같은 버전 재전달, 만료된 요청은 보내지 않는다. 10초 안에 같은 안내(권장 행동 + 접근 방향)가 반복되면 보내지 않지만, 그 요청은 `refresh`로 남긴다. 나머지는 PENDING으로 예약한 뒤 `YIELD_ALERT_ISSUED`를 보내고 SENT/FAILED로 확정한다. `alertVersion`은 `decisionVersion`과 같다. |
+| `YIELD_ALERT_CLEAR_REQUESTED` | 활성 알림이 있으면 `YIELD_ALERT_CLEARED`를 보내고 CLEARED로 바꾼다. 차량이 오프라인이어도 알림은 종료한다. envelope `occurredAt`이 현재 결정(`decidedAt`)보다 오래된 해제는 이전 에피소드의 것이므로 무시한다. |
 | `ROUTE_UPDATE_REQUESTED` | 이미 전달한 `routeVersion`보다 높을 때만 `EMERGENCY_ROUTE_UPDATED`를 긴급차량에 보낸다. |
 | `YIELD_ALERT_ACKNOWLEDGED` | 차량과 `alertVersion`이 현재 알림과 일치할 때만 ACKNOWLEDGED로 바꾼다. |
-| 만료 스케줄러 | 1초마다 `expiresAt`이 지난 SENT/ACKNOWLEDGED 알림을 EXPIRED로 바꾸고 `YIELD_ALERT_CLEARED(reason=EXPIRED)`를 보낸다. |
+| 만료 스케줄러 | 1초마다 실행한다. 억제된 더 새로운 결정(`refresh`)이 있으면 만료 2초 전에 그 내용으로 다시 발행한다. 없으면 `expiresAt`이 지난 SENT/ACKNOWLEDGED 알림을 EXPIRED로 바꾸고 `YIELD_ALERT_CLEARED(reason=EXPIRED)`를 보낸다. |
 
 Gateway 세션(`ws:vehicle:{id}`)이 없거나 채널을 구독 중인 Gateway가 없으면(PUBLISH 수신자 0명) FAILED로 기록한다.
+Redis 상태 전이는 항상 PostgreSQL 기록보다 먼저 일어난다. PostgreSQL 오류로 다시 처리되는 엔트리는 Redis에 이미
+반영된 내용을 멱등하게 다시 기록하므로, 이력은 늦어질 수는 있어도 사라지지 않고 메시지가 두 번 나가지도 않는다.
+종료된 이력 행(CLEARED/EXPIRED/FAILED)은 늦게 온 쓰기로 되살아나지 않는다. 클라이언트는 이미 받은 것보다 낮은
+`alertVersion`을 무시해야 한다(여러 인스턴스로 운영할 때 필요하다).
+
 형식이 잘못된 엔트리와 `MAX_DELIVERIES`를 넘긴 엔트리는 `stream:alert-worker:dlq`로 보낸다. 처리 중 예외가 나면
 Ack하지 않으므로 `PENDING_MIN_IDLE_MS`가 지난 뒤 다시 처리된다.
 

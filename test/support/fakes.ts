@@ -20,9 +20,12 @@ export class FakeStates implements AlertStateStore {
     return state && !isTerminal(state.status) ? state : null;
   }
 
-  async save(state: AlertState) {
+  async save(state: AlertState, expectedEpisode: string | null) {
     const current = this.states.get(state.alertId);
     if (current && current.alertVersion > state.alertVersion) return false;
+    const live = current && !isTerminal(current.status) ? current : undefined;
+    if (expectedEpisode === null ? live !== undefined && live.alertLogId !== state.alertLogId
+      : live?.alertLogId !== expectedEpisode) return false;
     this.states.set(state.alertId, {...state});
     const key = `${state.dispatchId}:${state.targetVehicleId}`;
     if (isTerminal(state.status)) {
@@ -52,7 +55,11 @@ export class FakeStates implements AlertStateStore {
       .map(state => state.alertId);
   }
 
-  async unschedule(alertId: string) { this.unscheduled.push(alertId); }
+  async unschedule(alertId: string) {
+    const current = this.states.get(alertId);
+    if (current && (current.status === 'SENT' || current.status === 'ACKNOWLEDGED')) return;
+    this.unscheduled.push(alertId);
+  }
 }
 
 export class FakeDedup implements Deduplicator {
@@ -85,18 +92,34 @@ export class FakePublisher implements DeliveryPublisher {
   }
 }
 
+const ENDED: readonly AlertStatus[] = ['CLEARED', 'EXPIRED', 'FAILED'];
+
+/** Mirrors the SQL guards: inserts are idempotent and an ended row never goes back to a live status. */
 export class FakeLogs implements AlertDeliveryLogStore {
   readonly rows = new Map<string, AlertDeliveryLog>();
   insertCalls = 0;
+  /** Number of upcoming writes (insert or updateStatus) that throw, simulating a PostgreSQL outage. */
+  failNext = 0;
+  private maybeFail() {
+    if (this.failNext > 0) {
+      this.failNext--;
+      throw new Error('postgres unavailable');
+    }
+  }
   readonly updates: {alertLogId: string; status: AlertStatus; at: string; extra?: LogStatusExtra}[] = [];
   async insert(log: AlertDeliveryLog) {
+    this.maybeFail();
     this.insertCalls++;
     if (!this.rows.has(log.alertLogId)) this.rows.set(log.alertLogId, {...log});
   }
   async updateStatus(alertLogId: string, status: AlertStatus, at: string, extra?: LogStatusExtra) {
+    this.maybeFail();
     this.updates.push({alertLogId, status, at, extra});
     const row = this.rows.get(alertLogId);
-    if (row) this.rows.set(alertLogId, {...row, alertStatus: status});
+    if (!row || (ENDED.includes(row.alertStatus) && !ENDED.includes(status))) return;
+    this.rows.set(alertLogId, {...row, alertStatus: status, alertVersion: extra?.alertVersion ?? row.alertVersion,
+      acknowledgedAt: status === 'ACKNOWLEDGED' ? at : row.acknowledgedAt,
+      clearedAt: ENDED.includes(status) ? at : row.clearedAt, clearReason: extra?.clearReason ?? row.clearReason});
   }
   async findByDispatchId(dispatchId: string) {
     return [...this.rows.values()].filter(row => row.dispatchId === dispatchId);

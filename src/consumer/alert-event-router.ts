@@ -5,7 +5,10 @@ import {
   YIELD_ALERT_REQUESTED, type AlertStreamEvent,
 } from '../domain/contracts';
 import {logger} from '../infra/logger';
+import type {EventMeta} from '../domain/types';
 import type {RouteUpdateService} from '../route/route-update-service';
+
+const meta = (event: AlertStreamEvent): EventMeta => ({eventId: event.eventId, occurredAt: event.occurredAt});
 
 export interface AlertServices {
   yieldAlerts: Pick<YieldAlertService, 'handleRequested' | 'handleClearRequested'>;
@@ -24,13 +27,13 @@ export class AlertEventRouter implements EventRouter {
   async route(event: AlertStreamEvent): Promise<void> {
     switch (event.eventType) {
       case YIELD_ALERT_REQUESTED: {
-        const result = await this.services.yieldAlerts.handleRequested(event.payload);
+        const result = await this.services.yieldAlerts.handleRequested(event.payload, meta(event));
         logger.info('yield alert requested', {eventId: event.eventId, ...result,
           vehicleId: event.payload.targetVehicleId, decisionVersion: event.payload.decisionVersion});
         return;
       }
       case YIELD_ALERT_CLEAR_REQUESTED: {
-        const result = await this.services.yieldAlerts.handleClearRequested(event.payload);
+        const result = await this.services.yieldAlerts.handleClearRequested(event.payload, meta(event));
         logger.info('yield alert clear requested', {eventId: event.eventId, ...result, reason: event.payload.reason});
         return;
       }

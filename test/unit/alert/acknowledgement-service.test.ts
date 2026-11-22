@@ -11,7 +11,7 @@ beforeEach(async () => {
   states = new FakeStates();
   logs = new FakeLogs();
   svc = new AcknowledgementService({states, logs});
-  await states.save(state());
+  await states.save(state(), null);
 });
 
 test('ack for current version transitions to ACKNOWLEDGED with receivedAt', async () => {
@@ -37,10 +37,11 @@ test('ack for unknown alert is ignored', async () => {
   expect(logs.updates).toHaveLength(0);
 });
 
-test('duplicate ack is idempotent', async () => {
+test('duplicate ack only re-applies the same history', async () => {
   await svc.handleAck(ack);
   await svc.handleAck(ack);
-  expect(logs.updates).toHaveLength(1);
+  expect(new Set(logs.updates.map(update => JSON.stringify(update))).size).toBe(1);
+  expect(states.get('ALT-001')).toMatchObject({status: 'ACKNOWLEDGED', acknowledgedAt: ack.receivedAt});
 });
 
 test('ack after clear does not reopen the alert', async () => {
@@ -52,4 +53,12 @@ test('ack after clear does not reopen the alert', async () => {
 test('isCurrentVersion compares alertVersion', () => {
   expect(svc.isCurrentVersion(state(), 3)).toBe(true);
   expect(svc.isCurrentVersion(state(), 2)).toBe(false);
+});
+
+test('redelivered ack repairs the acknowledged log', async () => {
+  logs.failNext = 1;
+  await expect(svc.handleAck(ack)).rejects.toThrow('postgres');
+  await svc.handleAck(ack);
+  expect(logs.updates).toEqual([{alertLogId: state().alertLogId, status: 'ACKNOWLEDGED', at: ack.receivedAt,
+    extra: undefined}]);
 });

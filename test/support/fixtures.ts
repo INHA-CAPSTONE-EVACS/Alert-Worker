@@ -8,8 +8,10 @@ export const state = (overrides: Partial<AlertState> = {}): AlertState => ({
   alertId: 'ALT-001', alertLogId: '00000000-0000-4000-8000-000000000001', dispatchId: 'DSP-001',
   emergencyId: 'EMG-001', targetVehicleId: 'VEH-001', status: 'SENT', alertVersion: 3,
   recommendedAction: 'YIELD_WHEN_SAFE', approachDirection: 'REAR', lastSentAt: NOW, acknowledgedAt: null,
-  clearedAt: null, expiresAt: '2026-10-12T08:00:20.000Z', ...overrides,
+  clearedAt: null, expiresAt: '2026-10-12T08:00:20.000Z', decidedAt: NOW, refresh: null, ...overrides,
 });
+
+export const meta = (occurredAt = NOW) => ({eventId: `evt-${occurredAt}`, occurredAt});
 
 export const requested = (overrides: Partial<YieldAlertRequestedPayload> = {}): YieldAlertRequestedPayload => ({
   alertId: 'ALT-001', emergencyId: 'EMG-001', dispatchId: 'DSP-001', emergencyVehicleId: 'AMB-001',

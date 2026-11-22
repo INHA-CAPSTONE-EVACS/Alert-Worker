@@ -50,7 +50,10 @@ export class PgAlertDeliveryLogRepository implements AlertDeliveryLogStore {
          estimated_arrival_seconds = COALESCE($7::int, estimated_arrival_seconds),
          expires_at = COALESCE($8::timestamptz, expires_at),
          clear_reason = COALESCE($9::varchar, clear_reason)
-       WHERE alert_log_id = $1`,
+       WHERE alert_log_id = $1
+         -- An ended episode is never revived by a late or redelivered write.
+         AND NOT (alert_status IN ('CLEARED', 'EXPIRED', 'FAILED')
+                  AND $2::varchar NOT IN ('CLEARED', 'EXPIRED', 'FAILED'))`,
       [alertLogId, status, acknowledged, ended, at, extra.alertVersion ?? null,
         extra.estimatedArrivalSeconds ?? null, extra.expiresAt ?? null, extra.clearReason ?? null]);
   }
