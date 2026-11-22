@@ -1,0 +1,26 @@
+# Overlay for the capstone root compose file. Relative paths resolve against the first -f file's directory.
+#   docker compose -f docker-compose.local.yml -f Alert-Worker/deploy/compose.alert-worker.yml up -d --build --wait alert-worker
+services:
+  alert-worker:
+    build:
+      context: ./Alert-Worker
+      dockerfile: Dockerfile.local
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgres://evacs:evacs@postgres:5432/evacs
+      HEALTH_PORT: '18083'
+      CONSUMER_NAME: alert-worker-local
+      BLOCK_MS: '1000'
+    ports:
+      - '18083:18083'
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:18083/readyz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    stop_grace_period: 10s
