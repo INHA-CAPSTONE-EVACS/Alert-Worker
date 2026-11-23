@@ -1,5 +1,5 @@
 import {hostname} from 'node:os';
-import {ALERT_STREAM, CONSUMER_GROUP, DEDUP_TTL_MS, DLQ_STREAM} from '../domain/contracts';
+import {ALERT_STREAM, ALERTED_VEHICLES_KEY_PATTERN, CONSUMER_GROUP, DEDUP_TTL_MS, DLQ_STREAM} from '../domain/contracts';
 
 export interface WorkerConfig {
   redisUrl: string;
@@ -17,6 +17,8 @@ export interface WorkerConfig {
   dedupTtlMs: number;
   dlqMaxlen: number;
   shutdownDrainTimeoutMs: number;
+  /** Control API Server alerted-vehicle Set key; must contain %s for the emergency ID. */
+  alertedKeyPattern: string;
 }
 
 export interface ConfigIssue {variable: string; message: string}
@@ -62,7 +64,11 @@ export function loadConfig(env: Env = process.env): WorkerConfig {
     dedupTtlMs: integer('DEDUP_TTL_MS', DEDUP_TTL_MS),
     dlqMaxlen: integer('DLQ_MAXLEN', 10_000),
     shutdownDrainTimeoutMs: integer('SHUTDOWN_DRAIN_TIMEOUT_MS', 5000),
+    alertedKeyPattern: read('EVACS_ALERT_KEY_PATTERN') ?? ALERTED_VEHICLES_KEY_PATTERN,
   };
+  if ((config.alertedKeyPattern.match(/%s/g) ?? []).length !== 1) {
+    issues.push({variable: 'EVACS_ALERT_KEY_PATTERN', message: 'must contain exactly one %s'});
+  }
   if (issues.length) throw new ConfigError(issues);
   return config;
 }

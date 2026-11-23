@@ -1,6 +1,6 @@
 import {ConfigError, loadConfig} from '../../../src/config/config';
 
-const DATABASE_URL = 'postgres://evacs:evacs@127.0.0.1:5433/evacs';
+const DATABASE_URL = 'mysql://evacs:evacs@127.0.0.1:33306/evacs';
 
 test('applies defaults', () => {
   const config = loadConfig({DATABASE_URL, HOSTNAME: 'host-a'});

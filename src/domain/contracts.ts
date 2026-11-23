@@ -4,6 +4,9 @@ export const DLQ_STREAM = 'stream:alert-worker:dlq';
 export const CONSUMER_GROUP = 'alert-worker';
 export const EVENT_FIELD = 'event';
 export const DEDUP_TTL_MS = 10_000;
+/** Read by the Control API Server (`EVACS_ALERT_KEY_PATTERN`): vehicles that acknowledged an alert, %s = emergency ID. */
+export const ALERTED_VEHICLES_KEY_PATTERN = 'evacs:emergency:%s:alerted';
+export const ALERTED_VEHICLES_TTL_MS = 24 * 60 * 60 * 1000;
 export const STATE_RETENTION_MS = 300_000;
 export const ALERT_EXPIRY_KEY = 'alert:expiry';
 

@@ -2,13 +2,13 @@ import Redis from 'ioredis';
 import {loadConfig} from '../../src/config/config';
 import {gatewayChannel} from '../../src/domain/contracts';
 import type {AlertState, GatewayFrame} from '../../src/domain/types';
-import {createPool} from '../../src/infra/postgres';
-import {PgAlertDeliveryLogRepository} from '../../src/store/alert-delivery-log-repository';
+import {createMysqlPool} from '../../src/infra/mysql';
+import {MysqlAlertDeliveryLogRepository} from '../../src/store/alert-delivery-log-repository';
 import {Worker} from '../../src/worker';
 import {TEST_DATABASE_URL, TEST_REDIS_URL, uniqueId} from '../support/redis';
 
 /**
- * Runs the whole worker against the sandbox Redis/Postgres and plays the Gateway's part of the contract:
+ * Runs the whole worker against the sandbox Redis/MySQL and plays the Gateway's part of the contract:
  * it registers ws:vehicle sessions, subscribes to its channel and writes client ACKs to the stream.
  */
 const stream = uniqueId('e2e:alert-stream');
@@ -23,8 +23,8 @@ const alertId = uniqueId('ALT');
 
 const redis = new Redis(TEST_REDIS_URL);
 const channel = new Redis(TEST_REDIS_URL);
-const pool = createPool(TEST_DATABASE_URL);
-const logs = new PgAlertDeliveryLogRepository(pool);
+const pool = createMysqlPool(TEST_DATABASE_URL);
+const logs = new MysqlAlertDeliveryLogRepository(pool);
 const frames: {frame: GatewayFrame; at: number}[] = [];
 let worker: Worker;
 

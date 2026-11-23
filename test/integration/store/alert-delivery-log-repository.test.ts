@@ -1,11 +1,11 @@
 import {randomUUID} from 'node:crypto';
 import type {AlertDeliveryLog} from '../../../src/domain/types';
-import {createPool} from '../../../src/infra/postgres';
-import {PgAlertDeliveryLogRepository} from '../../../src/store/alert-delivery-log-repository';
+import {createMysqlPool} from '../../../src/infra/mysql';
+import {MysqlAlertDeliveryLogRepository} from '../../../src/store/alert-delivery-log-repository';
 import {TEST_DATABASE_URL, uniqueId} from '../../support/redis';
 
-const pool = createPool(TEST_DATABASE_URL);
-const repo = new PgAlertDeliveryLogRepository(pool);
+const pool = createMysqlPool(TEST_DATABASE_URL);
+const repo = new MysqlAlertDeliveryLogRepository(pool);
 afterAll(() => pool.end());
 
 const log = (overrides: Partial<AlertDeliveryLog> = {}): AlertDeliveryLog => ({

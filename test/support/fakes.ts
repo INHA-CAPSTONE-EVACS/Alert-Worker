@@ -1,6 +1,7 @@
 import type {
   AlertDeliveryLog, AlertDeliveryLogStore, AlertState, AlertStateStore, AlertStatus, Deduplicator,
   DeliveryPublisher, GatewayFrame, LogStatusExtra, RouteVersionStore, SessionInfo, SessionLocator,
+  AlertedVehicleStore,
 } from '../../src/domain/types';
 import {isTerminal} from '../../src/domain/types';
 
@@ -98,12 +99,12 @@ const ENDED: readonly AlertStatus[] = ['CLEARED', 'EXPIRED', 'FAILED'];
 export class FakeLogs implements AlertDeliveryLogStore {
   readonly rows = new Map<string, AlertDeliveryLog>();
   insertCalls = 0;
-  /** Number of upcoming writes (insert or updateStatus) that throw, simulating a PostgreSQL outage. */
+  /** Number of upcoming writes (insert or updateStatus) that throw, simulating a MySQL outage. */
   failNext = 0;
   private maybeFail() {
     if (this.failNext > 0) {
       this.failNext--;
-      throw new Error('postgres unavailable');
+      throw new Error('database unavailable');
     }
   }
   readonly updates: {alertLogId: string; status: AlertStatus; at: string; extra?: LogStatusExtra}[] = [];
@@ -123,6 +124,16 @@ export class FakeLogs implements AlertDeliveryLogStore {
   }
   async findByDispatchId(dispatchId: string) {
     return [...this.rows.values()].filter(row => row.dispatchId === dispatchId);
+  }
+}
+
+export class FakeAlerted implements AlertedVehicleStore {
+  readonly sets = new Map<string, Set<string>>();
+  async add(emergencyId: string, vehicleId: string) {
+    this.sets.set(emergencyId, (this.sets.get(emergencyId) ?? new Set()).add(vehicleId));
+  }
+  members(emergencyId: string) {
+    return [...(this.sets.get(emergencyId) ?? [])].sort();
   }
 }
 

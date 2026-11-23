@@ -5,6 +5,7 @@ import {RedisSessionLocator} from '../../../src/delivery/session-locator';
 import {ALERT_EXPIRY_KEY, activeAlertKey, alertStateKey, gatewayChannel} from '../../../src/domain/contracts';
 import {AlertStateRepository} from '../../../src/store/alert-state-repository';
 import {RedisRouteVersionStore} from '../../../src/store/route-version-store';
+import {RedisAlertedVehicleStore} from '../../../src/store/alerted-vehicle-store';
 import {frame, state} from '../../support/fixtures';
 import {TEST_REDIS_URL, uniqueId, uniqueRedis} from '../../support/redis';
 
@@ -233,5 +234,18 @@ describe('AlertStateRepository fences', () => {
     expect((await repo.findById(alertId))!.refresh).toEqual(refresh);
     await repo.transition(alertId, ['SENT'], 'SENT', {refresh: null}, 3);
     expect((await repo.findById(alertId))!.refresh).toBeNull();
+  });
+});
+
+describe('RedisAlertedVehicleStore', () => {
+  test('keeps each acknowledging vehicle once under the Control API key, with a TTL', async () => {
+    const emergencyId = uniqueId('EMG');
+    const store = new RedisAlertedVehicleStore(redis, 'evacs:emergency:%s:alerted');
+    await store.add(emergencyId, 'VEH-002');
+    await store.add(emergencyId, 'VEH-001');
+    await store.add(emergencyId, 'VEH-002');
+    const key = `evacs:emergency:${emergencyId}:alerted`;
+    expect((await redis.smembers(key)).sort()).toEqual(['VEH-001', 'VEH-002']);
+    expect(await redis.pttl(key)).toBeGreaterThan(0);
   });
 });

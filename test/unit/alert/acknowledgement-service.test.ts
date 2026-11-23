@@ -1,16 +1,18 @@
 import {AcknowledgementService} from '../../../src/alert/acknowledgement-service';
 import {state} from '../../support/fixtures';
-import {FakeLogs, FakeStates} from '../../support/fakes';
+import {FakeAlerted, FakeLogs, FakeStates} from '../../support/fakes';
 
 let states: FakeStates;
 let logs: FakeLogs;
+let alerted: FakeAlerted;
 let svc: AcknowledgementService;
 const ack = {alertId: 'ALT-001', vehicleId: 'VEH-001', alertVersion: 3, receivedAt: '2026-10-12T08:00:01.200Z'};
 
 beforeEach(async () => {
   states = new FakeStates();
   logs = new FakeLogs();
-  svc = new AcknowledgementService({states, logs});
+  alerted = new FakeAlerted();
+  svc = new AcknowledgementService({states, logs, alerted});
   await states.save(state(), null);
 });
 
@@ -57,8 +59,28 @@ test('isCurrentVersion compares alertVersion', () => {
 
 test('redelivered ack repairs the acknowledged log', async () => {
   logs.failNext = 1;
-  await expect(svc.handleAck(ack)).rejects.toThrow('postgres');
+  await expect(svc.handleAck(ack)).rejects.toThrow('database');
   await svc.handleAck(ack);
   expect(logs.updates).toEqual([{alertLogId: state().alertLogId, status: 'ACKNOWLEDGED', at: ack.receivedAt,
     extra: undefined}]);
+});
+
+test('ack records the vehicle in the emergency alerted set read by the Control API', async () => {
+  await svc.handleAck(ack);
+  await svc.handleAck(ack);
+  expect(alerted.members(state().emergencyId)).toEqual(['VEH-001']);
+});
+
+test('ignored acks do not mark the vehicle as alerted', async () => {
+  await svc.handleAck({...ack, alertVersion: 2});
+  await svc.handleAck({...ack, vehicleId: 'VEH-999'});
+  expect(alerted.members(state().emergencyId)).toEqual([]);
+});
+
+test('a history failure leaves the set to the redelivery that repairs it', async () => {
+  logs.failNext = 1;
+  await expect(svc.handleAck(ack)).rejects.toThrow('database');
+  expect(alerted.members(state().emergencyId)).toEqual([]);
+  await svc.handleAck(ack);
+  expect(alerted.members(state().emergencyId)).toEqual(['VEH-001']);
 });

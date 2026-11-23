@@ -1,4 +1,5 @@
-# Overlay for the capstone root compose file. Relative paths resolve against the first -f file's directory.
+# Overlay for a capstone root compose file that does not define alert-worker yet (the current root file already does).
+# Relative paths resolve against the first -f file's directory. Apply the MySQL migration first (scripts/migrate-local.sh).
 #   docker compose -f docker-compose.local.yml -f Alert-Worker/deploy/compose.alert-worker.yml up -d --build --wait alert-worker
 services:
   alert-worker:
@@ -7,7 +8,7 @@ services:
       dockerfile: Dockerfile.local
     environment:
       REDIS_URL: redis://redis:6379/0
-      DATABASE_URL: postgres://evacs:evacs@postgres:5432/evacs
+      DATABASE_URL: mysql://evacs:evacs@mysql:3306/evacs
       HEALTH_PORT: '18083'
       CONSUMER_NAME: alert-worker-local
       BLOCK_MS: '1000'
@@ -16,7 +17,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
+      mysql:
         condition: service_healthy
     healthcheck:
       test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:18083/readyz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]

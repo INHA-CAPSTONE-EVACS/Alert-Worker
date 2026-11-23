@@ -1,5 +1,5 @@
 import type Redis from 'ioredis';
-import type {Pool} from 'pg';
+import type {Pool} from 'mysql2/promise';
 import {AcknowledgementService} from './alert/acknowledgement-service';
 import {AlertDeduplicator} from './alert/alert-deduplicator';
 import {AlertExpirationScheduler} from './alert/alert-expiration-scheduler';
@@ -13,10 +13,11 @@ import {RedisPubSubDeliveryPublisher} from './delivery/redis-pubsub-delivery-pub
 import {RedisSessionLocator} from './delivery/session-locator';
 import {HealthServer, type Readiness} from './infra/health-server';
 import {logger} from './infra/logger';
-import {createPool} from './infra/postgres';
+import {createMysqlPool} from './infra/mysql';
 import {createRedis} from './infra/redis';
 import {RouteUpdateService} from './route/route-update-service';
-import {PgAlertDeliveryLogRepository} from './store/alert-delivery-log-repository';
+import {MysqlAlertDeliveryLogRepository} from './store/alert-delivery-log-repository';
+import {RedisAlertedVehicleStore} from './store/alerted-vehicle-store';
 import {AlertStateRepository} from './store/alert-state-repository';
 import {RedisRouteVersionStore} from './store/route-version-store';
 
@@ -44,7 +45,7 @@ export class Worker {
     private readonly config: WorkerConfig,
     readonly redis: Redis,
     private readonly pool: Pool,
-    private readonly logs: PgAlertDeliveryLogRepository,
+    private readonly logs: MysqlAlertDeliveryLogRepository,
     private readonly subscriber: AlertEventSubscriber,
     private readonly scheduler: AlertExpirationScheduler,
     private readonly health: HealthServer,
@@ -52,17 +53,17 @@ export class Worker {
 
   static create(config: WorkerConfig): Worker {
     const redis = createRedis(config.redisUrl);
-    const pool = createPool(config.databaseUrl);
+    const pool = createMysqlPool(config.databaseUrl);
     const clock = () => new Date();
     const states = new AlertStateRepository(redis);
     const dedup = new AlertDeduplicator(redis, config.dedupTtlMs);
-    const logs = new PgAlertDeliveryLogRepository(pool);
+    const logs = new MysqlAlertDeliveryLogRepository(pool);
     const factory = new AlertMessageFactory();
     const deliverer = new AlertDeliverer(new RedisSessionLocator(redis), new RedisPubSubDeliveryPublisher(redis));
     const router = new AlertEventRouter({
       yieldAlerts: new YieldAlertService({states, dedup, deliverer, logs, factory, clock}),
       routes: new RouteUpdateService({routes: new RedisRouteVersionStore(redis), deliverer, factory}),
-      acks: new AcknowledgementService({states, logs}),
+      acks: new AcknowledgementService({states, logs, alerted: new RedisAlertedVehicleStore(redis, config.alertedKeyPattern)}),
     });
     const subscriber = new AlertEventSubscriber(redis, config, router);
     const scheduler = new AlertExpirationScheduler({states, dedup, deliverer, logs, factory, clock});
@@ -101,7 +102,7 @@ export class Worker {
   async readiness(): Promise<Readiness> {
     const checks = {
       redis: this.redis.status === 'ready' && await passes(() => this.redis.ping()),
-      postgres: await passes(() => this.logs.ping()),
+      mysql: await passes(() => this.logs.ping()),
       subscriber: this.subscriber.ready,
     };
     return {ready: Object.values(checks).every(Boolean), checks};

@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import Redis from 'ioredis';
 
 export const TEST_REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6401';
-export const TEST_DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://evacs:evacs@127.0.0.1:5433/evacs';
+export const TEST_DATABASE_URL = process.env.DATABASE_URL ?? 'mysql://evacs:evacs@127.0.0.1:33306/evacs';
 
 export const uniqueId = (label: string) => `${label}-${randomUUID().slice(0, 8)}`;
 

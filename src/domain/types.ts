@@ -156,6 +156,11 @@ export interface AlertDeliveryLogStore {
   findByDispatchId(dispatchId: string): Promise<AlertDeliveryLog[]>;
 }
 
+/** Control API Server read model of vehicles that confirmed an alert for an emergency. */
+export interface AlertedVehicleStore {
+  add(emergencyId: string, vehicleId: string): Promise<void>;
+}
+
 export interface RouteVersionStore {
   isLatest(dispatchId: string, routeVersion: number): Promise<boolean>;
   markDelivered(dispatchId: string, routeVersion: number): Promise<void>;

@@ -156,7 +156,7 @@ const later = (ms: number) => new Date(Date.parse(NOW) + ms).toISOString();
 
 test('redelivery after expiresAt still repairs missing history', async () => {
   logs.failNext = 1;
-  await expect(svc.handleRequested(requested())).rejects.toThrow('postgres');
+  await expect(svc.handleRequested(requested())).rejects.toThrow('database');
   expect(publisher.frames).toHaveLength(1);
   now = later(30_000);
   expect((await svc.handleRequested(requested())).outcome).toBe('DUPLICATE');
@@ -168,7 +168,7 @@ test('redelivered update repairs the log version', async () => {
   await svc.handleRequested(requested());
   logs.failNext = 1;
   const update = requested({decisionVersion: 4, approachDirection: 'LEFT'});
-  await expect(svc.handleRequested(update)).rejects.toThrow('postgres');
+  await expect(svc.handleRequested(update)).rejects.toThrow('database');
   expect((await svc.handleRequested(update)).outcome).toBe('DUPLICATE');
   expect(publisher.frames).toHaveLength(2);
   expect([...logs.rows.values()][0]!.alertVersion).toBe(4);
@@ -177,7 +177,7 @@ test('redelivered update repairs the log version', async () => {
 test('redelivered clear repairs the cleared log', async () => {
   await svc.handleRequested(requested(), meta(NOW));
   logs.failNext = 1;
-  await expect(svc.handleClearRequested(clear, meta(later(1000)))).rejects.toThrow('postgres');
+  await expect(svc.handleClearRequested(clear, meta(later(1000)))).rejects.toThrow('database');
   expect((await svc.handleClearRequested(clear, meta(later(1000)))).outcome).toBe('NO_ACTIVE_ALERT');
   expect([...logs.rows.values()][0]).toMatchObject({alertStatus: 'CLEARED', clearReason: 'EMERGENCY_PASSED'});
   expect(publisher.frames).toHaveLength(2);

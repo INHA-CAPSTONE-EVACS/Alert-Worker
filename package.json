@@ -5,7 +5,9 @@
   "description": "EVACS Alert Worker",
   "license": "UNLICENSED",
   "main": "dist/src/main.js",
-  "engines": {"node": ">=26"},
+  "engines": {
+    "node": ">=26"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/src/main.js",
@@ -15,9 +17,15 @@
     "test:integration": "jest --selectProjects integration",
     "test:e2e": "jest --selectProjects e2e"
   },
-  "dependencies": {"ioredis": "6.0.0", "pg": "8.16.3"},
+  "dependencies": {
+    "ioredis": "6.0.0",
+    "mysql2": "3.24.6"
+  },
   "devDependencies": {
-    "@types/jest": "30.0.0", "@types/node": "26.6.6", "@types/pg": "8.15.5",
-    "jest": "30.5.2", "ts-jest": "29.4.15", "typescript": "6.0.3"
+    "@types/jest": "30.0.0",
+    "@types/node": "26.6.6",
+    "jest": "30.5.2",
+    "ts-jest": "29.4.15",
+    "typescript": "6.0.3"
   }
 }

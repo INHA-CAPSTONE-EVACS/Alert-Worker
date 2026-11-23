@@ -27,7 +27,7 @@ test('livez is always 200', async () => {
 test('readyz is 200 after start and 503 after redis disconnect', async () => {
   const ready = await get('/readyz');
   expect(ready.status).toBe(200);
-  expect(await ready.json()).toEqual({ready: true, checks: {redis: true, postgres: true, subscriber: true}});
+  expect(await ready.json()).toEqual({ready: true, checks: {redis: true, mysql: true, subscriber: true}});
   worker.redis.disconnect();
   const notReady = await get('/readyz');
   expect(notReady.status).toBe(503);

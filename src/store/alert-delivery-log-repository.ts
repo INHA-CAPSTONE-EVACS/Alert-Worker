@@ -1,9 +1,9 @@
-import type {Pool} from 'pg';
+import type {Pool, RowDataPacket} from 'mysql2/promise';
 import type {
   AlertDeliveryLog, AlertDeliveryLogStore, AlertStatus, LogStatusExtra,
 } from '../domain/types';
 
-interface Row {
+interface Row extends RowDataPacket {
   alert_log_id: string;
   alert_id: string;
   alert_version: number;
@@ -20,49 +20,52 @@ interface Row {
 }
 
 const iso = (value: Date | null) => value ? value.toISOString() : null;
+const date = (value: string | null | undefined) => value ? new Date(value) : null;
 
 /** alert_delivery_log persistence. All writes are safe to repeat on stream redelivery. */
-export class PgAlertDeliveryLogRepository implements AlertDeliveryLogStore {
+export class MysqlAlertDeliveryLogRepository implements AlertDeliveryLogStore {
   constructor(private readonly pool: Pool) {}
 
   async insert(log: AlertDeliveryLog): Promise<void> {
+    // The no-op update keeps a redelivered insert idempotent without INSERT IGNORE swallowing CHECK failures.
     await this.pool.query(
       `INSERT INTO alert_delivery_log (alert_log_id, alert_id, alert_version, dispatch_id, target_vehicle_id,
          selection_reason, estimated_arrival_seconds, alert_status, first_sent_at, acknowledged_at, cleared_at,
          expires_at, clear_reason)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       ON CONFLICT (alert_log_id) DO NOTHING`,
-      [log.alertLogId, log.alertId, log.alertVersion, log.dispatchId, log.targetVehicleId, log.selectionReason,
-        log.estimatedArrivalSeconds, log.alertStatus, log.firstSentAt, log.acknowledgedAt, log.clearedAt,
-        log.expiresAt, log.clearReason]);
+       VALUES (:alertLogId, :alertId, :alertVersion, :dispatchId, :targetVehicleId, :selectionReason,
+         :estimatedArrivalSeconds, :alertStatus, :firstSentAt, :acknowledgedAt, :clearedAt, :expiresAt, :clearReason)
+       ON DUPLICATE KEY UPDATE alert_log_id = alert_log_id`,
+      {...log, firstSentAt: date(log.firstSentAt), acknowledgedAt: date(log.acknowledgedAt),
+        clearedAt: date(log.clearedAt), expiresAt: date(log.expiresAt)});
   }
 
   async updateStatus(alertLogId: string, status: AlertStatus, at: string, extra: LogStatusExtra = {}): Promise<void> {
-    const acknowledged = status === 'ACKNOWLEDGED';
-    const ended = status === 'CLEARED' || status === 'EXPIRED' || status === 'FAILED';
     await this.pool.query(
       `UPDATE alert_delivery_log SET
-         alert_status = $2::varchar,
-         acknowledged_at = CASE WHEN $3::boolean THEN $5::timestamptz ELSE acknowledged_at END,
-         cleared_at = CASE WHEN $4::boolean THEN $5::timestamptz ELSE cleared_at END,
-         first_sent_at = COALESCE(first_sent_at, CASE WHEN $2::varchar = 'SENT' THEN $5::timestamptz END),
-         alert_version = COALESCE($6::int, alert_version),
-         estimated_arrival_seconds = COALESCE($7::int, estimated_arrival_seconds),
-         expires_at = COALESCE($8::timestamptz, expires_at),
-         clear_reason = COALESCE($9::varchar, clear_reason)
-       WHERE alert_log_id = $1
+         alert_status = :status,
+         acknowledged_at = IF(:acknowledged, :at, acknowledged_at),
+         cleared_at = IF(:ended, :at, cleared_at),
+         first_sent_at = COALESCE(first_sent_at, IF(:status = 'SENT', :at, NULL)),
+         alert_version = COALESCE(:alertVersion, alert_version),
+         estimated_arrival_seconds = COALESCE(:estimatedArrivalSeconds, estimated_arrival_seconds),
+         expires_at = COALESCE(:expiresAt, expires_at),
+         clear_reason = COALESCE(:clearReason, clear_reason)
+       WHERE alert_log_id = :alertLogId
          -- An ended episode is never revived by a late or redelivered write.
          AND NOT (alert_status IN ('CLEARED', 'EXPIRED', 'FAILED')
-                  AND $2::varchar NOT IN ('CLEARED', 'EXPIRED', 'FAILED'))`,
-      [alertLogId, status, acknowledged, ended, at, extra.alertVersion ?? null,
-        extra.estimatedArrivalSeconds ?? null, extra.expiresAt ?? null, extra.clearReason ?? null]);
+                  AND :status NOT IN ('CLEARED', 'EXPIRED', 'FAILED'))`,
+      {alertLogId, status, at: new Date(at), acknowledged: status === 'ACKNOWLEDGED',
+        ended: status === 'CLEARED' || status === 'EXPIRED' || status === 'FAILED',
+        alertVersion: extra.alertVersion ?? null, estimatedArrivalSeconds: extra.estimatedArrivalSeconds ?? null,
+        expiresAt: date(extra.expiresAt), clearReason: extra.clearReason ?? null});
   }
 
   async findByDispatchId(dispatchId: string): Promise<AlertDeliveryLog[]> {
-    const result = await this.pool.query<Row>(
-      'SELECT * FROM alert_delivery_log WHERE dispatch_id = $1 ORDER BY first_sent_at NULLS LAST, alert_log_id',
-      [dispatchId]);
-    return result.rows.map(row => ({
+    // MySQL has no NULLS LAST; `IS NULL` sorts unsent rows after sent ones.
+    const [rows] = await this.pool.query<Row[]>(
+      `SELECT * FROM alert_delivery_log WHERE dispatch_id = :dispatchId
+       ORDER BY first_sent_at IS NULL, first_sent_at, alert_log_id`, {dispatchId});
+    return rows.map(row => ({
       alertLogId: row.alert_log_id,
       alertId: row.alert_id,
       alertVersion: row.alert_version,
@@ -80,6 +83,6 @@ export class PgAlertDeliveryLogRepository implements AlertDeliveryLogStore {
   }
 
   async ping(): Promise<void> {
-    await this.pool.query('SELECT 1 FROM alert_delivery_log LIMIT 0');
+    await this.pool.query({sql: 'SELECT 1 FROM alert_delivery_log LIMIT 0', timeout: 1000});
   }
 }
