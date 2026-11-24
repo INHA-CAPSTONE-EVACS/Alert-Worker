@@ -2,8 +2,8 @@ import type Redis from 'ioredis';
 import {gatewayChannel} from '../domain/contracts';
 import type {DeliveryPublisher, GatewayFrame} from '../domain/types';
 
-/** Publishes to the single Gateway instance holding the vehicle's socket. */
-export class RedisPubSubDeliveryPublisher implements DeliveryPublisher {
+/** Legacy pubsub publisher: publishes to the single Gateway instance holding the vehicle's socket. */
+export class RedisPubSubDeliveryPublisher {
   constructor(private readonly redis: Redis) {}
 
   async publish(gatewayId: string, frame: GatewayFrame): Promise<number> {

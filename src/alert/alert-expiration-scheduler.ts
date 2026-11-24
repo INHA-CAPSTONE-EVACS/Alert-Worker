@@ -82,7 +82,7 @@ export class AlertExpirationScheduler {
     }
     // The alert is out of the expiry index now, so each follow-up step must run even if another fails.
     await this.attempt(state.alertId, 'deliver', () => deliverer.deliver(state.targetVehicleId,
-      factory.createCleared(state.alertId, state.targetVehicleId, 'EXPIRED')));
+      factory.createCleared(state.alertId, state.targetVehicleId, 'EXPIRED', state.dispatchId)));
     await this.attempt(state.alertId, 'dedup', () => dedup.forget(state.dispatchId, state.targetVehicleId));
     await this.attempt(state.alertId, 'history', () =>
       logs.updateStatus(state.alertLogId, 'EXPIRED', at, {clearReason: 'EXPIRED'}));

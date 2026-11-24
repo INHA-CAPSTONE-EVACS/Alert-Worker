@@ -82,7 +82,7 @@ export class YieldAlertService {
     }
 
     const outcome = await deliverer.deliver(state.targetVehicleId,
-      factory.createCleared(p.alertId, state.targetVehicleId, p.reason));
+      factory.createCleared(p.alertId, state.targetVehicleId, p.reason, state.dispatchId));
     const at = clock().toISOString();
     // The alert ends even if the vehicle is offline: it no longer needs to yield.
     const cleared = await states.transition(p.alertId, ['PENDING', 'SENT', 'ACKNOWLEDGED'], 'CLEARED',

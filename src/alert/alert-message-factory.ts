@@ -38,8 +38,16 @@ export class AlertMessageFactory {
     };
   }
 
-  createCleared(alertId: string, targetVehicleId: string, reason: ClearReason): YieldAlertClearedMessage {
-    return {type: 'YIELD_ALERT_CLEARED', eventType: 'YIELD_ALERT_CLEARED', alertId, targetVehicleId, reason};
+  createCleared(alertId: string, targetVehicleId: string, reason: ClearReason, dispatchId?: string): YieldAlertClearedMessage {
+    const msg: YieldAlertClearedMessage = {
+      type: 'YIELD_ALERT_CLEARED',
+      eventType: 'YIELD_ALERT_CLEARED',
+      alertId,
+      targetVehicleId,
+      reason,
+    };
+    if (dispatchId) msg.dispatchId = dispatchId;
+    return msg;
   }
 
   createRouteUpdated(p: RouteUpdateRequestedPayload): EmergencyRouteUpdatedMessage {

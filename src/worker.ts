@@ -9,8 +9,7 @@ import type {WorkerConfig} from './config/config';
 import {AlertEventRouter} from './consumer/alert-event-router';
 import {AlertEventSubscriber} from './consumer/alert-event-subscriber';
 import {AlertDeliverer} from './delivery/alert-deliverer';
-import {RedisPubSubDeliveryPublisher} from './delivery/redis-pubsub-delivery-publisher';
-import {RedisSessionLocator} from './delivery/session-locator';
+import {RedisStreamDeliveryPublisher} from './delivery/redis-stream-delivery-publisher';
 import {HealthServer, type Readiness} from './infra/health-server';
 import {logger} from './infra/logger';
 import {createMysqlPool} from './infra/mysql';
@@ -59,7 +58,8 @@ export class Worker {
     const dedup = new AlertDeduplicator(redis, config.dedupTtlMs);
     const logs = new MysqlAlertDeliveryLogRepository(pool);
     const factory = new AlertMessageFactory();
-    const deliverer = new AlertDeliverer(new RedisSessionLocator(redis), new RedisPubSubDeliveryPublisher(redis));
+    const publisher = new RedisStreamDeliveryPublisher(redis, config.gatewayAlertStream, config.gatewayAlertStreamMaxlen);
+    const deliverer = new AlertDeliverer(publisher, clock);
     const router = new AlertEventRouter({
       yieldAlerts: new YieldAlertService({states, dedup, deliverer, logs, factory, clock}),
       routes: new RouteUpdateService({routes: new RedisRouteVersionStore(redis), deliverer, factory}),

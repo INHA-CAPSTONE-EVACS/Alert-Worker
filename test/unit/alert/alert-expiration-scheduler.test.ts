@@ -38,8 +38,8 @@ test.each<AlertStatus>(['SENT', 'ACKNOWLEDGED'])('expired %s alert becomes EXPIR
   const alert = await seed({status, expiresAt: PAST});
   expect(await scheduler.sweepExpired(NOW)).toBe(1);
   expect(states.get('ALT-001')).toMatchObject({status: 'EXPIRED', clearedAt: NOW.toISOString()});
-  expect(publisher.frames.map(entry => entry.frame.message)).toEqual([{type: 'YIELD_ALERT_CLEARED',
-    eventType: 'YIELD_ALERT_CLEARED', alertId: 'ALT-001', targetVehicleId: 'VEH-001', reason: 'EXPIRED'}]);
+  expect(publisher.events.map(e => e.envelope.payload)).toEqual([expect.objectContaining({alertId: 'ALT-001',
+    targetVehicleId: 'VEH-001', reason: 'EXPIRED'})]);
   expect(dedup.records.size).toBe(0);
   expect(logs.updates).toEqual([{alertLogId: alert.alertLogId, status: 'EXPIRED', at: NOW.toISOString(),
     extra: {clearReason: 'EXPIRED'}}]);
@@ -49,7 +49,7 @@ test('not-yet-expired alert untouched', async () => {
   await seed({expiresAt: FUTURE});
   expect(await scheduler.sweepExpired(NOW)).toBe(0);
   expect(states.get('ALT-001')!.status).toBe('SENT');
-  expect(publisher.frames).toHaveLength(0);
+  expect(publisher.events).toHaveLength(0);
 });
 
 test('sweep skips cleared alert', async () => {
@@ -63,7 +63,7 @@ test('sweep skips cleared alert', async () => {
   };
   expect(await scheduler.sweepExpired(NOW)).toBe(0);
   expect(states.get('ALT-001')!.status).toBe('CLEARED');
-  expect(publisher.frames).toHaveLength(0);
+  expect(publisher.events).toHaveLength(0);
 });
 
 test('a failing delivery does not stop the other expiries', async () => {
@@ -71,13 +71,14 @@ test('a failing delivery does not stop the other expiries', async () => {
   await seed({alertId: 'ALT-002', targetVehicleId: 'VEH-002', expiresAt: PAST,
     alertLogId: '00000000-0000-4000-8000-000000000002'});
   const publish = publisher.publish.bind(publisher);
-  publisher.publish = async (gatewayId, frame) => {
-    if (frame.targetVehicleId === 'VEH-001') throw new Error('publish failed');
-    return publish(gatewayId, frame);
+  publisher.publish = async (eventKey, envelope) => {
+    const payload = envelope.payload as Record<string, unknown>;
+    if (payload.targetVehicleId === 'VEH-001') throw new Error('publish failed');
+    return publish(eventKey, envelope);
   };
   expect(await scheduler.sweepExpired(NOW)).toBe(2);
   expect(states.get('ALT-002')!.status).toBe('EXPIRED');
-  expect(publisher.frames.map(entry => entry.frame.targetVehicleId)).toEqual(['VEH-002']);
+  expect(publisher.events.map(e => (e.envelope.payload as any).targetVehicleId)).toEqual(['VEH-002']);
 });
 
 test('start runs sweeps on an interval and stop halts them', async () => {
@@ -102,8 +103,8 @@ test('due alert with a newer suppressed refresh is re-issued instead of expired'
   // Expires within the refresh lead, so the client never sees the gap.
   await seed({expiresAt: '2026-10-12T08:00:31.000Z', refresh});
   expect(await scheduler.sweepExpired(NOW)).toBe(0);
-  expect(publisher.frames.map(entry => entry.frame.message)).toEqual([expect.objectContaining({
-    type: 'YIELD_ALERT_ISSUED', alertVersion: 4, estimatedArrivalSeconds: 4, expiresAt: FUTURE})]);
+  expect(publisher.events.map(e => e.envelope.payload)).toEqual([expect.objectContaining({
+    alertVersion: 4, estimatedArrivalSeconds: 4, expiresAt: FUTURE})]);
   expect(states.get('ALT-001')).toMatchObject({status: 'SENT', alertVersion: 4, expiresAt: FUTURE, refresh: null,
     lastSentAt: NOW.toISOString()});
   expect(logs.updates.at(-1)).toMatchObject({status: 'SENT', extra: {alertVersion: 4, expiresAt: FUTURE}});
@@ -119,7 +120,7 @@ test('history failure does not stop the client CLEARED', async () => {
   await seed({expiresAt: PAST});
   logs.failNext = 1;
   await scheduler.sweepExpired(NOW);
-  expect(publisher.frames.map(entry => entry.frame.message.type)).toEqual(['YIELD_ALERT_CLEARED']);
+  expect(publisher.events.map(e => e.envelope.eventType)).toEqual(['YIELD_ALERT_CLEARED']);
   expect(states.get('ALT-001')!.status).toBe('EXPIRED');
 });
 

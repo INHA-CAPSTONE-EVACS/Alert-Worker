@@ -1,5 +1,7 @@
 import {hostname} from 'node:os';
-import {ALERT_STREAM, ALERTED_VEHICLES_KEY_PATTERN, CONSUMER_GROUP, DEDUP_TTL_MS, DLQ_STREAM} from '../domain/contracts';
+import {
+  ALERT_STREAM, ALERTED_VEHICLES_KEY_PATTERN, CONSUMER_GROUP, DEDUP_TTL_MS, DEFAULT_GATEWAY_ALERT_STREAM, DLQ_STREAM,
+} from '../domain/contracts';
 
 export interface WorkerConfig {
   redisUrl: string;
@@ -7,6 +9,8 @@ export interface WorkerConfig {
   healthPort: number;
   alertStream: string;
   dlqStream: string;
+  gatewayAlertStream: string;
+  gatewayAlertStreamMaxlen: number;
   consumerGroup: string;
   consumerName: string;
   readCount: number;
@@ -54,6 +58,8 @@ export function loadConfig(env: Env = process.env): WorkerConfig {
     healthPort: integer('HEALTH_PORT', 18083, 0, 65535),
     alertStream: read('ALERT_STREAM') ?? ALERT_STREAM,
     dlqStream: read('DLQ_STREAM') ?? DLQ_STREAM,
+    gatewayAlertStream: read('GATEWAY_ALERT_STREAM') ?? read('EVACS_ALERT_STREAM') ?? DEFAULT_GATEWAY_ALERT_STREAM,
+    gatewayAlertStreamMaxlen: integer('GATEWAY_ALERT_STREAM_MAXLEN', 10_000),
     consumerGroup: read('CONSUMER_GROUP') ?? CONSUMER_GROUP,
     consumerName: read('CONSUMER_NAME') ?? read('HOSTNAME') ?? hostname(),
     readCount: integer('READ_COUNT', 10),

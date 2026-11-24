@@ -54,6 +54,7 @@ export interface YieldAlertClearedMessage {
   type: 'YIELD_ALERT_CLEARED';
   eventType: 'YIELD_ALERT_CLEARED';
   alertId: string;
+  dispatchId?: string;
   targetVehicleId: string;
   reason: ClearReason;
 }
@@ -88,8 +89,8 @@ export interface SessionInfo {
 }
 
 export type DeliveryOutcome = 'SENT' | 'NO_SESSION' | 'NO_SUBSCRIBER' | 'SUPPRESSED' | 'STALE' | 'DUPLICATE'
-  | 'EXPIRED' | 'NO_ACTIVE_ALERT';
-export type SendOutcome = Extract<DeliveryOutcome, 'SENT' | 'NO_SESSION' | 'NO_SUBSCRIBER'>;
+  | 'EXPIRED' | 'NO_ACTIVE_ALERT' | 'FAILED';
+export type SendOutcome = Extract<DeliveryOutcome, 'SENT' | 'NO_SESSION' | 'NO_SUBSCRIBER' | 'FAILED'>;
 
 export interface DeliveryResult {
   outcome: DeliveryOutcome;
@@ -145,9 +146,18 @@ export interface SessionLocator {
   findGateway(vehicleId: string): Promise<SessionInfo | null>;
 }
 
+export type GatewayOutboundEvent<T = unknown> = {
+  eventId: string;
+  eventType: string;
+  schemaVersion: 1;
+  occurredAt: string;
+  producer: string;
+  payload: T;
+};
+
 export interface DeliveryPublisher {
-  /** Returns the number of Gateway subscribers that received the frame. */
-  publish(gatewayId: string, frame: GatewayFrame): Promise<number>;
+  /** Publishes an outbound alert event to the Gateway Redis Stream. */
+  publish(eventKey: string, envelope: GatewayOutboundEvent): Promise<string | number>;
 }
 
 export interface AlertDeliveryLogStore {

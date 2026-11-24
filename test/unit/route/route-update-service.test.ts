@@ -23,8 +23,13 @@ beforeEach(() => {
 
 test('route update sends EMERGENCY_ROUTE_UPDATED to emergency vehicle', async () => {
   expect((await svc.handleRouteUpdate(route(3))).outcome).toBe('SENT');
-  expect(publisher.frames).toEqual([{gatewayId: 'gw-2', frame: {targetVehicleId: 'AMB-001', sessionId: 's-9',
-    message: expect.objectContaining({type: 'EMERGENCY_ROUTE_UPDATED', routeVersion: 3})}}]);
+  expect(publisher.events).toEqual([{
+    eventKey: 'DSP-001:route:3:EMERGENCY_ROUTE_UPDATED:AMB-001',
+    envelope: expect.objectContaining({
+      eventType: 'EMERGENCY_ROUTE_UPDATED',
+      payload: expect.objectContaining({routeVersion: 3, targetVehicleId: 'AMB-001'}),
+    }),
+  }]);
   expect(routes.delivered.get('DSP-001')).toBe(3);
 });
 
@@ -32,13 +37,13 @@ test('older or equal routeVersion is STALE', async () => {
   await svc.handleRouteUpdate(route(3));
   expect((await svc.handleRouteUpdate(route(2))).outcome).toBe('STALE');
   expect((await svc.handleRouteUpdate(route(3))).outcome).toBe('STALE');
-  expect(publisher.frames).toHaveLength(1);
+  expect(publisher.events).toHaveLength(1);
 });
 
 test('undelivered route does not advance version', async () => {
-  sessions.sessions.clear();
-  expect((await svc.handleRouteUpdate(route(3))).outcome).toBe('NO_SESSION');
+  publisher.shouldFail = true;
+  expect((await svc.handleRouteUpdate(route(3))).outcome).toBe('FAILED');
   expect(routes.delivered.has('DSP-001')).toBe(false);
-  sessions.connect('AMB-001');
+  publisher.shouldFail = false;
   expect((await svc.handleRouteUpdate(route(3))).outcome).toBe('SENT');
 });

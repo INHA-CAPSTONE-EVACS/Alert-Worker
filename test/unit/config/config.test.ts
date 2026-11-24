@@ -7,6 +7,7 @@ test('applies defaults', () => {
   expect(config).toMatchObject({
     redisUrl: 'redis://localhost:6401', databaseUrl: DATABASE_URL, healthPort: 18083,
     alertStream: 'stream:alert:event', dlqStream: 'stream:alert-worker:dlq', consumerGroup: 'alert-worker',
+    gatewayAlertStream: 'evacs:stream:yield-alert', gatewayAlertStreamMaxlen: 10000,
     consumerName: 'host-a', readCount: 10, blockMs: 1000, pendingMinIdleMs: 30000, maxDeliveries: 5,
     expirySweepMs: 1000, dedupTtlMs: 10000,
   });

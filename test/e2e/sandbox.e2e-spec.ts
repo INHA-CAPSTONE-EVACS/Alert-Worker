@@ -9,11 +9,11 @@ import {TEST_DATABASE_URL, TEST_REDIS_URL, uniqueId} from '../support/redis';
 
 /**
  * Runs the whole worker against the sandbox Redis/MySQL and plays the Gateway's part of the contract:
- * it registers ws:vehicle sessions, subscribes to its channel and writes client ACKs to the stream.
+ * it consumes the Gateway Redis Stream and writes client ACKs back to the alert stream.
  */
 const stream = uniqueId('e2e:alert-stream');
 const dlq = uniqueId('e2e:alert-dlq');
-const gatewayId = uniqueId('gw-e2e');
+const gatewayStream = uniqueId('e2e:gateway-stream');
 const dispatchId = uniqueId('DSP');
 const vehicle = uniqueId('EVACS_CAR');
 const expiringVehicle = uniqueId('EVACS_CAR');
@@ -22,11 +22,13 @@ const ambulance = uniqueId('AMB');
 const alertId = uniqueId('ALT');
 
 const redis = new Redis(TEST_REDIS_URL);
-const channel = new Redis(TEST_REDIS_URL);
+const gatewayReader = new Redis(TEST_REDIS_URL);
 const pool = createMysqlPool(TEST_DATABASE_URL);
 const logs = new MysqlAlertDeliveryLogRepository(pool);
 const frames: {frame: GatewayFrame; at: number}[] = [];
+const streamEvents: {eventKey: string; envelope: any; at: number}[] = [];
 let worker: Worker;
+let gatewayReading = true;
 
 const iso = (offsetMs = 0) => new Date(Date.now() + offsetMs).toISOString();
 const xadd = (eventType: string, payload: object, producer = 'emergency-worker') =>
@@ -50,26 +52,57 @@ async function waitFor<T>(probe: () => Promise<T | undefined> | T | undefined, t
 }
 const nextFrame = (from: number, predicate: (frame: GatewayFrame) => boolean = () => true) =>
   waitFor(() => frames.slice(from).find(entry => predicate(entry.frame)));
-const session = (vehicleId: string, gateway = gatewayId) => redis.set(`ws:vehicle:${vehicleId}`,
-  JSON.stringify({vehicleId, gatewayId: gateway, sessionId: `s-${vehicleId}`, connectedAt: iso()}));
+const nextEvent = (from: number, predicate: (envelope: any) => boolean = () => true) =>
+  waitFor(() => streamEvents.slice(from).find(entry => predicate(entry.envelope)));
+
+async function consumeGatewayStream() {
+  let lastId = '$';
+  while (gatewayReading) {
+    try {
+      const res = await gatewayReader.xread('BLOCK', 200, 'STREAMS', gatewayStream, lastId) as [string, [string, string[]][]][] | null;
+      if (res && res[0]) {
+        for (const [id, fields] of res[0][1]) {
+          lastId = id;
+          const map = new Map<string, string>();
+          for (let i = 0; i < fields.length; i += 2) map.set(fields[i], fields[i + 1]);
+          const envelope = JSON.parse(map.get('event') ?? '{}');
+          const payload = envelope.payload ?? {};
+          streamEvents.push({eventKey: map.get('eventKey') ?? '', envelope, at: Date.now()});
+          frames.push({
+            frame: {
+              targetVehicleId: payload.targetVehicleId ?? payload.vehicleId ?? '',
+              sessionId: `s-${payload.targetVehicleId ?? payload.vehicleId ?? ''}`,
+              message: {
+                type: envelope.eventType,
+                eventType: envelope.eventType,
+                ...payload,
+              },
+            },
+            at: Date.now(),
+          });
+        }
+      }
+    } catch {
+      if (!gatewayReading) break;
+    }
+  }
+}
 
 beforeAll(async () => {
-  await channel.subscribe(gatewayChannel(gatewayId));
-  channel.on('message', (_name, message) => frames.push({frame: JSON.parse(message) as GatewayFrame, at: Date.now()}));
-  await Promise.all([session(vehicle), session(expiringVehicle), session(ambulance),
-    session(offlineGatewayVehicle, uniqueId('gw-nobody'))]);
+  void consumeGatewayStream();
   worker = Worker.create(loadConfig({DATABASE_URL: TEST_DATABASE_URL, REDIS_URL: TEST_REDIS_URL,
-    ALERT_STREAM: stream, DLQ_STREAM: dlq, CONSUMER_GROUP: uniqueId('e2e-group'), HEALTH_PORT: '0', BLOCK_MS: '200',
+    ALERT_STREAM: stream, DLQ_STREAM: dlq, GATEWAY_ALERT_STREAM: gatewayStream,
+    CONSUMER_GROUP: uniqueId('e2e-group'), HEALTH_PORT: '0', BLOCK_MS: '200',
     EXPIRY_SWEEP_MS: '200'}));
   await worker.start();
 });
 
 afterAll(async () => {
+  gatewayReading = false;
+  gatewayReader.disconnect();
   await worker.stop();
   const keys = await redis.keys(`*${dispatchId}*`);
-  await redis.del(stream, dlq, ...keys, ...[vehicle, expiringVehicle, ambulance, offlineGatewayVehicle]
-    .map(id => `ws:vehicle:${id}`));
-  channel.disconnect();
+  await redis.del(stream, dlq, gatewayStream, ...keys);
   redis.disconnect();
   await pool.end();
 });
@@ -152,14 +185,13 @@ test('route updates reach the emergency vehicle once, newest version only', asyn
     message: {type: 'EMERGENCY_ROUTE_UPDATED', routeVersion: 2, congestedSegments: ['EDGE-101']}});
 });
 
-test('alert to a gateway nobody listens on is recorded as FAILED', async () => {
+test('alert without gateway connection is still written to gateway stream as SENT', async () => {
   const id = uniqueId('ALT');
+  const mark = streamEvents.length;
   await xadd('YIELD_ALERT_REQUESTED', requested({alertId: id, targetVehicleId: offlineGatewayVehicle}));
-  const failed = await waitFor(async () => {
-    const value = await alertState(id);
-    return value?.status === 'FAILED' ? value : undefined;
-  });
-  expect(failed.lastSentAt).toBeNull();
+  const delivered = await nextEvent(mark, env => env.payload.alertId === id);
+  expect(delivered.envelope.payload).toMatchObject({alertId: id, targetVehicleId: offlineGatewayVehicle});
+  expect((await alertState(id))!.status).toBe('SENT');
 });
 
 test('nothing is left pending or dead-lettered', async () => {

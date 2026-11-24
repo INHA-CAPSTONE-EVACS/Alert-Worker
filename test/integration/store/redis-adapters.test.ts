@@ -1,6 +1,7 @@
 import Redis from 'ioredis';
 import {AlertDeduplicator} from '../../../src/alert/alert-deduplicator';
 import {RedisPubSubDeliveryPublisher} from '../../../src/delivery/redis-pubsub-delivery-publisher';
+import {RedisStreamDeliveryPublisher} from '../../../src/delivery/redis-stream-delivery-publisher';
 import {RedisSessionLocator} from '../../../src/delivery/session-locator';
 import {ALERT_EXPIRY_KEY, activeAlertKey, alertStateKey, gatewayChannel} from '../../../src/domain/contracts';
 import {AlertStateRepository} from '../../../src/store/alert-state-repository';
@@ -127,6 +128,31 @@ describe('RedisSessionLocator', () => {
     const vehicleId = uniqueId('V');
     if (value !== undefined) await redis.set(`ws:vehicle:${vehicleId}`, value);
     expect(await locator.findGateway(vehicleId)).toBeNull();
+  });
+});
+
+describe('RedisStreamDeliveryPublisher', () => {
+  test('publish adds eventKey and event to stream', async () => {
+    const stream = uniqueId('test-gateway-stream');
+    const publisher = new RedisStreamDeliveryPublisher(redis, stream, 100);
+    const eventKey = 'DSP-001:ALT-001:1:YIELD_ALERT_ISSUED:VEH-001';
+    const envelope = {
+      eventId: eventKey,
+      eventType: 'YIELD_ALERT_ISSUED',
+      schemaVersion: 1 as const,
+      occurredAt: '2026-11-24T09:00:00.000Z',
+      producer: 'alert-worker',
+      payload: {alertId: 'ALT-001', vehicleId: 'VEH-001'},
+    };
+    const entryId = await publisher.publish(eventKey, envelope);
+    expect(typeof entryId).toBe('string');
+    expect(entryId).toMatch(/^\d+-\d+$/);
+
+    const entries = await redis.xrange(stream, '-', '+') as [string, string[]][];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]![0]).toBe(entryId);
+    const fields = entries[0]![1];
+    expect(fields).toEqual(['eventKey', eventKey, 'event', JSON.stringify(envelope)]);
   });
 });
 

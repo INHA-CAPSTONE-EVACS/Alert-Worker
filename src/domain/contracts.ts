@@ -1,6 +1,7 @@
 // Redis protocol shared with Emergency Worker (producer) and the Gateway (delivery).
 export const ALERT_STREAM = 'stream:alert:event';
 export const DLQ_STREAM = 'stream:alert-worker:dlq';
+export const DEFAULT_GATEWAY_ALERT_STREAM = 'evacs:stream:yield-alert';
 export const CONSUMER_GROUP = 'alert-worker';
 export const EVENT_FIELD = 'event';
 export const DEDUP_TTL_MS = 10_000;

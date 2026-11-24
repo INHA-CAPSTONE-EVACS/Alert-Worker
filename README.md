@@ -1,11 +1,11 @@
 # EVACS Alert Worker
 
-Emergency Worker가 판별한 양보 알림 요청을 받아, 대상 차량이 연결된 Gateway로 클라이언트 메시지를 전달하는
+Emergency Worker가 판별한 양보 알림 요청을 받아, Gateway가 소비할 수 있도록 Redis Stream(`evacs:stream:yield-alert`)에 클라이언트 메시지를 발행하는
 워커다. 알림의 현재 상태는 Redis에, 전송 이력은 MySQL `alert_delivery_log`(관제 API 서버와 같은 `evacs` DB)에 남긴다.
 (상세설계서 58–64p, 이벤트 명세 96–108p, 요구사항 F-ALT-01~05)
 
 ```text
-Emergency Worker ─XADD─▶ stream:alert:event ─▶ Alert Worker ─PUBLISH─▶ channel:gateway:{gatewayId} ─▶ Gateway ─▶ 차량
+Emergency Worker ─XADD─▶ stream:alert:event ─▶ Alert Worker ─XADD─▶ evacs:stream:yield-alert ─▶ Gateway ─▶ 차량
 Gateway(차량 ACK) ─XADD─▶ stream:alert:event ─┘        │
                                                       ├─ Redis   alert:{alertId}:state, alert:expiry, …
                                                       ├─ MySQL   alert_delivery_log
@@ -33,17 +33,18 @@ Ack하지 않으므로 `PENDING_MIN_IDLE_MS`가 지난 뒤 다시 처리된다.
 
 ## Gateway 연동 계약
 
-현재 Gateway는 아래 계약을 아직 구현하지 않았다. Gateway 후속 작업의 입력으로 쓴다.
+Alert Worker는 게이트웨이가 구독하는 Redis Stream으로 표준 이벤트 엔벨로프를 발행한다.
 
-- **세션 등록:** 연결되면 `SET ws:vehicle:{vehicleId} {"vehicleId","gatewayId","sessionId","connectedAt"}`.
-  끊기면 sessionId가 같을 때만 DEL한다.
-- **전달 수신:** `SUBSCRIBE channel:gateway:{gatewayId}`. 메시지는 `{"targetVehicleId","sessionId","message"}` JSON이고,
-  `message.type`은 `YIELD_ALERT_ISSUED` | `YIELD_ALERT_CLEARED` | `EMERGENCY_ROUTE_UPDATED`이다. `eventType`에도
-  같은 값이 들어 있다. client-core 형식이다.
-- **ACK 전달:** 클라이언트의 `yield.alert.ack`를 받으면
-  `XADD stream:alert:event * event '{"eventId","eventType":"YIELD_ALERT_ACKNOWLEDGED","schemaVersion":1,"occurredAt","producer":"gateway","payload":{"alertId","vehicleId","alertVersion","receivedAt"}}'`
-- 이 연동이 끝나면 Emergency Worker의 `evacs:stream:yield-alert` 이중 발행과 Gateway의 해당 스트림 소비를 제거한다.
-  그 전까지는 같은 알림이 두 경로로 전달될 수 있다.
+- **스트림 키:** `evacs:stream:yield-alert` (설정 `GATEWAY_ALERT_STREAM`, `EVACS_ALERT_STREAM`)
+- **스트림 엔트리 필드:**
+  - `eventKey`: 중복 방지용 업무 키 (예: `DSP-001:ALT-001:1:YIELD_ALERT_ISSUED:VEH-001`)
+  - `event`: JSON 인코딩된 표준 이벤트 Envelope (`eventId`, `eventType`, `schemaVersion: 1`, `occurredAt`, `producer: "alert-worker"`, `payload`)
+- **이벤트 타입:**
+  - `YIELD_ALERT_ISSUED`: 양보 알림 발령 (`alertId`, `alertVersion`, `vehicleId`, `targetVehicleId`, `message`, `expiresAt`, `approachDirection`, `recommendedAction`, `details`)
+  - `YIELD_ALERT_CLEARED`: 양보 알림 해제 (`alertId`, `vehicleId`, `targetVehicleId`, `reason`)
+  - `EMERGENCY_ROUTE_UPDATED`: 경로 업데이트 안내 (`routeVersion`, `destination`, `waypoints`, `congestedSegments`, `estimatedTravelSeconds`, `details`)
+- **ACK 전달:** 클라이언트의 `yield.alert.ack`를 받으면 Gateway가
+  `XADD stream:alert:event * event '{"eventId","eventType":"YIELD_ALERT_ACKNOWLEDGED","schemaVersion":1,"occurredAt","producer":"gateway","payload":{"alertId","vehicleId","alertVersion","receivedAt"}}'`를 발행한다.
 
 ## 실행
 

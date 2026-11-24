@@ -1,6 +1,6 @@
 import type {
   AlertDeliveryLog, AlertDeliveryLogStore, AlertState, AlertStateStore, AlertStatus, Deduplicator,
-  DeliveryPublisher, GatewayFrame, LogStatusExtra, RouteVersionStore, SessionInfo, SessionLocator,
+  DeliveryPublisher, GatewayFrame, GatewayOutboundEvent, LogStatusExtra, RouteVersionStore, SessionInfo, SessionLocator,
   AlertedVehicleStore,
 } from '../../src/domain/types';
 import {isTerminal} from '../../src/domain/types';
@@ -85,11 +85,29 @@ export class FakeSessions implements SessionLocator {
 }
 
 export class FakePublisher implements DeliveryPublisher {
+  readonly events: {eventKey: string; envelope: GatewayOutboundEvent}[] = [];
   readonly frames: {gatewayId: string; frame: GatewayFrame}[] = [];
   receivers = 1;
-  async publish(gatewayId: string, frame: GatewayFrame) {
-    this.frames.push({gatewayId, frame});
-    return this.receivers;
+  shouldFail = false;
+
+  async publish(eventKey: string, envelope: GatewayOutboundEvent): Promise<string | number> {
+    if (this.shouldFail || this.receivers === 0) return 0;
+    this.events.push({eventKey, envelope});
+    const payload = (envelope.payload ?? {}) as Record<string, unknown>;
+    const targetVehicleId = (payload.targetVehicleId ?? payload.vehicleId ?? '') as string;
+    this.frames.push({
+      gatewayId: 'gateway',
+      frame: {
+        targetVehicleId,
+        sessionId: '',
+        message: {
+          type: envelope.eventType as any,
+          eventType: envelope.eventType as any,
+          ...payload,
+        } as any,
+      },
+    });
+    return '1-0';
   }
 }
 
